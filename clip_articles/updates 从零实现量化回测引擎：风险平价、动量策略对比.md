@@ -1,0 +1,137 @@
+# updates 从零实现量化回测引擎：风险平价、动量策略对比
+[从零实现量化回测引擎：风险平价、动量策略对比](https://mp.weixin.qq.com/s?__biz=MzIwNTU2ODMwNg==&mid=2247487522&idx=1&sn=138abe3812673328a9b191967dab6a99&chksm=972fb07fa05839698869edb6f9343a9bd610e6fc860a524266b324af6ecd737d34254b61f4a3&token=265388920&lang=zh_CN#rd) 
+
+ 原创文章第 129 篇，专注 “个人成长与财富自由、世界运作的逻辑，AI 量化投资”。
+
+继承完善我们的引擎，昨天我们完成了引擎主体，就是一个 account.py。
+
+**01 引擎框架**
+
+![](https://github.com/Hsu-Outer-Brain/WebCliperCDN_001/blob/main/img3/2022-12-12%2018-13-23/d412f7ca-1e63-4979-b072-1c67bdf33aa0.png?raw=true)
+
+def run(self, algo_list):  
+    self.algo_list = algo_list  
+    for index, date in enumerate(self.dates):  
+        self.curr_date = date  
+        self.step(index, date)
+
+def step(self, index, date):  
+    return_se = self.\_get_curr_return_se(date)  
+    self.acc.update_bar(date, return_se)  
+    self.algo_processor()
+
+def algo_processor(self):  
+    context = {'engine': self, 'acc': self.acc}  
+    for algo in self.algo_list:  
+        if algo(context) is True:  # 如果 algo 返回 True, 直接不运行，本次不调仓  
+  return None  
+
+def get_results_df(self):  
+    df = pd.DataFrame({'date': self.acc.cache_dates, 'portfolio': self.acc.cache_portfolio_mv})  
+    df\['rate'] = df\['portfolio'].pct_change()  
+    df\['equity'] = (df\['rate'] + 1).cumprod()  
+    df.set_index('date', inplace\\=True)  
+    df.dropna(inplace\\=True)  
+    return df
+
+回测的结果通过 get_results_df 返回回来，交给分析器。
+
+**02 分析器**  
+
+我这个分析器天然就可以添加 N 个基准，quantstats 只能添加一个。
+
+class Analyzer:  
+    def \_\_init\_\_(self, df_results, benchmarks=\['000300.SH']):  
+        self.df_results = df_results  
+        self.benchmarks = benchmarks
+
+    def show\_results(self):  
+        returns = self.df\_results\['rate'\]  
+        import empyrical
+
+        print('累计收益：', round(empyrical.cum\_returns\_final(returns), 3))  
+        print('年化收益：', round(empyrical.annual\_return(returns), 3))  
+        print('最大回撤：', round(empyrical.max\_drawdown(returns), 3))  
+        print('夏普比', round(empyrical.sharpe\_ratio(returns), 3))  
+        print('卡玛比', round(empyrical.calmar\_ratio(returns), 3))  
+        print('omega', round(empyrical.omega\_ratio(returns)), 3)
+
+    def plot(self):  
+        returns = \[\]  
+        for s in self.benchmarks:  
+            df\_bench = DataUtils.load\_returns(\[s\])  
+            se = df\_bench\['return'\]  
+            se.name = s  
+            returns.append(se)
+
+        se\_port = self.df\_results\['rate'\]  
+        se\_port.name = 'strategy'  
+
+  returns.append(se_port)  
+        all_returns = pd.concat(returns, axis\\=1)  
+        all_returns.dropna(inplace\\=True)  
+        all_equity = (1 + all_returns).cumprod()
+
+        import matplotlib.pyplot as plt  
+        all\_equity.plot()  
+        plt.show()
+
+**03 等权 - 买入并持有**
+
+symbols = \['N225', '000300.SH', 'ADX', '000905.SH', '399673.SZ', 'HSI', 'GDAXI']  
+from engine.algo.algos import \*
+
+e = Engine(symbols)
+
+print('初始总市值', e.acc.get_total_mv())  
+e.run(algo_list\\=\[  
+    RunOnce(),  
+  SelectAll(),  
+  WeightEqually()  
+])  
+print('最终总市值', e.acc.get_total_mv())  
+e.show_results(benckmarks\\=\['000300.SH'])
+
+![](https://github.com/Hsu-Outer-Brain/WebCliperCDN_001/blob/main/img3/2022-12-12%2018-13-23/da4df3c2-fc2a-4cf9-b295-ef2ad09ec4b2.png?raw=true)
+
+![](https://github.com/Hsu-Outer-Brain/WebCliperCDN_001/blob/main/img3/2022-12-12%2018-13-23/ba543af7-00eb-4673-bc4e-39c36be037da.png?raw=true)
+
+**04 等权 - 周度再平衡**
+
+年化由 5.6% 提升到 6.1%，回撤由 44% 下降到 33%。
+
+![](https://github.com/Hsu-Outer-Brain/WebCliperCDN_001/blob/main/img3/2022-12-12%2018-13-23/9e472229-928d-459d-ac60-05d069641b20.png?raw=true)
+
+大家可以前往星球下载代码自己试，换一行代码即可。目前测试的结果——不考虑手续费的话，周频的效果最好。但考虑到成本，一般季度再平衡即可。  
+
+**05 风险平价——原生**  
+
+收益率上升至 6.2，夏普提升至 0.5。**风险平价可以提升夏普比**。
+
+![](https://github.com/Hsu-Outer-Brain/WebCliperCDN_001/blob/main/img3/2022-12-12%2018-13-23/64b01ff9-e5ec-469f-89d0-f73277130777.png?raw=true)
+
+![](https://github.com/Hsu-Outer-Brain/WebCliperCDN_001/blob/main/img3/2022-12-12%2018-13-23/58e509d1-ce09-4bdf-9d84-6cbc9f4e7ae6.png?raw=true)
+
+**06 风险平价 - PCA 主成份分解**  
+
+加上主成分分解后，收益提升较多，夏普比提升到 0.678。
+
+![](https://github.com/Hsu-Outer-Brain/WebCliperCDN_001/blob/main/img3/2022-12-12%2018-13-23/b7ace9dd-6ac5-4268-b36a-de50d927fdbc.png?raw=true)
+
+![](https://github.com/Hsu-Outer-Brain/WebCliperCDN_001/blob/main/img3/2022-12-12%2018-13-23/f7dd9905-c8cb-4ff5-a8ef-b81606db7c97.png?raw=true)
+
+**07 20 日动量 - 策略**
+
+![](https://github.com/Hsu-Outer-Brain/WebCliperCDN_001/blob/main/img3/2022-12-12%2018-13-23/23bf5d8b-ded1-43ad-b567-d639780a4eda.png?raw=true)
+
+![](https://github.com/Hsu-Outer-Brain/WebCliperCDN_001/blob/main/img3/2022-12-12%2018-13-23/ed3c821c-c401-4864-85dc-77b7e42811bb.png?raw=true)
+
+**20 日 - 斜率动量，仅排序**  
+
+![](https://github.com/Hsu-Outer-Brain/WebCliperCDN_001/blob/main/img3/2022-12-12%2018-13-23/1836e822-cd86-47ea-ab74-41bd8719deac.png?raw=true)
+
+![](https://github.com/Hsu-Outer-Brain/WebCliperCDN_001/blob/main/img3/2022-12-12%2018-13-23/df7bb1da-6065-4efc-ab0a-6dfe0721f4f8.png?raw=true)
+
+总结一下：  
+
+A 股，美股，港股，欧洲，日本 主要指数，等权是基准，年化不到 6%，风险平价可以有效提升夏普比，pca 更进一步提升不少收益率。动量策略肯定有效，但不确保回撤。我们需要把动量等因子，RSRS 择时等，融入的风险平价里。
